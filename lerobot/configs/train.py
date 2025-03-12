@@ -28,6 +28,8 @@ from lerobot.common.utils.hub import HubMixin
 from lerobot.configs import parser
 from lerobot.configs.default import DatasetConfig, EvalConfig, WandBConfig
 from lerobot.configs.policies import PreTrainedConfig
+from transformers import BitsAndBytesConfig
+from typing import Optional
 
 TRAIN_CONFIG_NAME = "train_config.json"
 
@@ -63,6 +65,7 @@ class TrainPipelineConfig(HubMixin):
     scheduler: LRSchedulerConfig | None = None
     eval: EvalConfig = field(default_factory=EvalConfig)
     wandb: WandBConfig = field(default_factory=WandBConfig)
+    quantization_config: Optional[BitsAndBytesConfig] = None
 
     def __post_init__(self):
         self.checkpoint_path = None

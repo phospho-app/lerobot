@@ -28,6 +28,8 @@ from lerobot.common.optim.schedulers import LRSchedulerConfig
 from lerobot.common.utils.hub import HubMixin
 from lerobot.common.utils.utils import auto_select_torch_device, is_amp_available, is_torch_device_available
 from lerobot.configs.types import FeatureType, NormalizationMode, PolicyFeature
+from transformers import BitsAndBytesConfig
+from typing import Optional
 
 # Generic variable that is either PreTrainedConfig or a subclass thereof
 T = TypeVar("T", bound="PreTrainedConfig")
@@ -59,6 +61,8 @@ class PreTrainedConfig(draccus.ChoiceRegistry, HubMixin, abc.ABC):
     # `use_amp` determines whether to use Automatic Mixed Precision (AMP) for training and evaluation. With AMP,
     # automatic gradient scaling is used.
     use_amp: bool = False
+    # PHOSPHO: quantization
+    quantization_config: Optional[BitsAndBytesConfig] = None
 
     def __post_init__(self):
         self.pretrained_path = None

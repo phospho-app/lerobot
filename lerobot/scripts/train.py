@@ -51,6 +51,7 @@ from lerobot.common.utils.wandb_utils import WandBLogger
 from lerobot.configs import parser
 from lerobot.configs.train import TrainPipelineConfig
 from lerobot.scripts.eval import eval_policy
+from transformers import BitsAndBytesConfig
 
 
 def update_policy(
@@ -136,6 +137,13 @@ def train(cfg: TrainPipelineConfig):
         eval_env = make_env(cfg.env, n_envs=cfg.eval.batch_size)
 
     logging.info("Creating policy")
+    # PHOSPHO DEBUG
+    quantization_config = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_compute_dtype=torch.bfloat16
+    )
+    cfg.policy.quantization_config = quantization_config
+
     policy = make_policy(
         cfg=cfg.policy,
         ds_meta=dataset.meta,

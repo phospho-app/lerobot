@@ -24,11 +24,42 @@ from transformers import (
     PaliGemmaForConditionalGeneration,
     PretrainedConfig,
     PreTrainedModel,
+    BitsAndBytesConfig
 )
 from transformers.models.auto import CONFIG_MAPPING
 
 from lerobot.common.policies.pi0.flex_attention import flex_attention_forward
+import bitsandbytes as bnb
 
+quantization_config = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_compute_dtype=torch.bfloat16
+)
+
+def replace_with_bnb_linear4bit(model, quantization_config):
+    """
+    Recursively replace nn.Linear layers with bnb.nn.Linear4bit layers for 4-bit quantization.
+    
+    Args:
+        model: The PyTorch model or module to quantize.
+        quantization_config: BitsAndBytesConfig specifying quantization parameters.
+    """
+    for name, module in model.named_children():
+        if isinstance(module, nn.Linear):
+            # Create a 4-bit quantized linear layer with the same dimensions
+            quantized_module = bnb.nn.Linear4bit(
+                input_features=module.in_features,
+                output_features=module.out_features,
+                bias=module.bias is not None,
+                compute_dtype=quantization_config.bnb_4bit_compute_dtype,
+                compress_statistics=True,
+                quant_type='nf4'  # Normal Float 4-bit, a common choice
+            )
+            # Replace the original module
+            setattr(model, name, quantized_module)
+        else:
+            # Recursively process submodules
+            replace_with_bnb_linear4bit(module, quantization_config)
 
 def apply_rope(x, positions, max_wavelength=10_000):
     """
@@ -181,6 +212,16 @@ class PaliGemmaWithExpertModel(PreTrainedModel):
 
         self.to_bfloat16_like_physical_intelligence()
         self.set_requires_grad()
+
+    def quantize(self, quantization_config):
+        """
+        Quantize the paligemma and gemma_expert submodels to 4-bit using BitsAndBytes.
+        
+        Args:
+            quantization_config: BitsAndBytesConfig for quantization settings.
+        """
+        replace_with_bnb_linear4bit(self.paligemma, quantization_config)
+        replace_with_bnb_linear4bit(self.gemma_expert, quantization_config)
 
     def set_requires_grad(self):
         if self.config.freeze_vision_encoder:

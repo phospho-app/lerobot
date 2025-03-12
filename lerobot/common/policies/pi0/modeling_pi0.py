@@ -48,7 +48,7 @@ policy = Pi0Policy.from_pretrained("lerobot/pi0")
 ```
 
 """
-
+import os
 import math
 from collections import deque
 
@@ -66,6 +66,18 @@ from lerobot.common.policies.pi0.paligemma_with_expert import (
 )
 from lerobot.common.policies.pretrained import PreTrainedPolicy
 from lerobot.common.utils.utils import get_safe_dtype
+
+from pathlib import Path
+from typing import Type, TypeVar
+
+from huggingface_hub import hf_hub_download
+from huggingface_hub.constants import SAFETENSORS_SINGLE_FILE
+from huggingface_hub.errors import HfHubHTTPError
+from torch import Tensor, nn
+
+from lerobot.configs.policies import PreTrainedConfig
+
+T = TypeVar("T", bound="PreTrainedPolicy")
 
 
 def create_sinusoidal_pos_embedding(
@@ -252,6 +264,75 @@ class PI0Policy(PreTrainedPolicy):
         self.model = PI0FlowMatching(config)
 
         self.reset()
+
+    @classmethod
+    def from_pretrained(
+        cls: Type[T],
+        pretrained_name_or_path: str | Path,
+        *,
+        config: PreTrainedConfig | None = None,
+        force_download: bool = False,
+        resume_download: bool | None = None,
+        proxies: dict | None = None,
+        token: str | bool | None = None,
+        cache_dir: str | Path | None = None,
+        local_files_only: bool = False,
+        revision: str | None = None,
+        strict: bool = False,
+        **kwargs,
+    ) -> T:
+        """
+        The policy is set in evaluation mode by default using `policy.eval()` (dropout modules are
+        deactivated). To train it, you should first set it back in training mode with `policy.train()`.
+        """
+        # Extract quantization_config from kwargs, default to None if not provided
+        quantization_config = kwargs.pop("quantization_config", None)
+
+        if config is None:
+            config = PreTrainedConfig.from_pretrained(
+                pretrained_name_or_path=pretrained_name_or_path,
+                force_download=force_download,
+                resume_download=resume_download,
+                proxies=proxies,
+                token=token,
+                cache_dir=cache_dir,
+                local_files_only=local_files_only,
+                revision=revision,
+                **kwargs,
+            )
+        model_id = str(pretrained_name_or_path)
+        instance = cls(config, quantization_config=quantization_config, **kwargs)
+
+        # Apply quantization if specified
+        if quantization_config is not None:
+            instance.model.paligemma_with_expert.quantize(quantization_config)
+            
+        if os.path.isdir(model_id):
+            print("Loading weights from local directory")
+            model_file = os.path.join(model_id, SAFETENSORS_SINGLE_FILE)
+            policy = cls._load_as_safetensor(instance, model_file, config.device, strict)
+        else:
+            try:
+                model_file = hf_hub_download(
+                    repo_id=model_id,
+                    filename=SAFETENSORS_SINGLE_FILE,
+                    revision=revision,
+                    cache_dir=cache_dir,
+                    force_download=force_download,
+                    proxies=proxies,
+                    resume_download=resume_download,
+                    token=token,
+                    local_files_only=local_files_only,
+                )
+                policy = cls._load_as_safetensor(instance, model_file, config.device, strict)
+            except HfHubHTTPError as e:
+                raise FileNotFoundError(
+                    f"{SAFETENSORS_SINGLE_FILE} not found on the HuggingFace Hub in {model_id}"
+                ) from e
+
+        policy.to(config.device)
+        policy.eval()
+        return policy
 
     def reset(self):
         """This should be called whenever the environment is reset."""
@@ -484,6 +565,10 @@ class PI0FlowMatching(nn.Module):
 
         self.set_requires_grad()
 
+        # Quantization stubs
+        # self.quant = quant.QuantStub()
+        # self.dequant = quant.DeQuantStub()
+
     def set_requires_grad(self):
         for params in self.state_proj.parameters():
             params.requires_grad = self.config.train_state_proj
@@ -509,6 +594,8 @@ class PI0FlowMatching(nn.Module):
         """Embed images with SigLIP and language tokens with embedding layer to prepare
         for PaliGemma transformer processing.
         """
+        # Quantize float inputs (images)
+        # images = [self.quant(img) for img in images]
         # TODO: avoid list in python and torch.cat ; prefer pre-allocation with torch.empty
         embs = []
         pad_masks = []
@@ -557,6 +644,11 @@ class PI0FlowMatching(nn.Module):
 
     def embed_suffix(self, state, noisy_actions, timestep):
         """Embed state, noisy_actions, timestep to prepare for Expert Gemma processing."""
+        # Quantize float inputs (state, noisy_actions, timestep)
+        # state = self.quant(state)
+        # noisy_actions = self.quant(noisy_actions)
+        # timestep = self.quant(timestep)
+
         embs = []
         pad_masks = []
         att_masks = []
@@ -612,6 +704,15 @@ class PI0FlowMatching(nn.Module):
         self, images, img_masks, lang_tokens, lang_masks, state, actions, noise=None, time=None
     ) -> Tensor:
         """Do a full training forward pass and compute the loss (batch_size x num_steps x num_motors)"""
+        # Quantize inputs
+        # images = [self.quant(img) for img in images]
+        # state = self.quant(state)
+        # actions = self.quant(actions)
+        # if noise is not None:
+        #     noise = self.quant(noise)
+        # if time is not None:
+        #     time = self.quant(time)
+            
         if noise is None:
             noise = self.sample_noise(actions.shape, actions.device)
 
@@ -645,6 +746,8 @@ class PI0FlowMatching(nn.Module):
         # Original openpi code, upcast attention output
         suffix_out = suffix_out.to(dtype=torch.float32)
         v_t = self.action_out_proj(suffix_out)
+        # Dequantize
+        # v_t = self.dequant(v_t)
 
         losses = F.mse_loss(u_t, v_t, reduction="none")
         return losses
@@ -692,6 +795,8 @@ class PI0FlowMatching(nn.Module):
             # Euler step
             x_t += dt * v_t
             time += dt
+        # Dequantize and return
+        # return self.dequant(x_t)
         return x_t
 
     def denoise_step(

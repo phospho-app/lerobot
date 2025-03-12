@@ -137,6 +137,9 @@ def make_policy(
         # Load a pretrained policy and override the config if needed (for example, if there are inference-time
         # hyperparameters that we want to vary).
         kwargs["pretrained_name_or_path"] = cfg.pretrained_path
+        # PHOSPHO
+        if cfg.quantization_config is not None:
+            kwargs["quantization_config"] = cfg.quantization_config
         policy = policy_cls.from_pretrained(**kwargs)
     else:
         # Make a fresh policy.
